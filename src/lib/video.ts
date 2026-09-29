@@ -13,10 +13,12 @@ export const MAX_FILE_SIZE = 1024 * 1024 * 1024;
 const MAX_REQUEST_OVERHEAD = 1024 * 1024;
 const JOB_TTL_MS = 60 * 60 * 1000;
 const MAX_UPLOADS_PER_HOUR = 5;
+const MAX_CONCURRENT_ENCODINGS = 1;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 const RATE_LIMITS = new Map<string, number[]>();
 const FFMPEG_PATH = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE_PATH = process.env.FFPROBE_PATH || "ffprobe";
+let activeEncodings = 0;
 
 export type Quality = "maximum" | "high" | "balanced";
 export type Resolution = "original" | "2160" | "1440" | "1080" | "720" | "480";
@@ -423,8 +425,16 @@ function setJobError(job: VideoJob, message: string, detail?: string) {
 }
 
 function runCompression(job: VideoJob, quality: Quality) {
+  let slotReleased = false;
+  const releaseSlot = () => {
+    if (slotReleased) return;
+    slotReleased = true;
+    activeEncodings -= 1;
+  };
+
   if (job.input.width % 2 !== 0 || job.input.height % 2 !== 0) {
     setJobError(job, "This video has odd pixel dimensions, which cannot be encoded as yuv420p without changing its resolution.");
+    releaseSlot();
     return;
   }
 
@@ -462,7 +472,8 @@ function runCompression(job: VideoJob, quality: Quality) {
     "-i", job.inputPath,
     "-map", "0:v:0", "-map", "0:a?",
     "-map_metadata", "0",
-    "-c:v", "libx264", "-preset", "medium", "-crf", crf, "-threads:v", "2",
+    "-filter_threads", "1",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, "-threads:v", "1",
     ...(filters.length ? ["-vf", filters.join(",")] : []),
     "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
     "-c:a", "aac", "-b:a", "192k",
@@ -509,26 +520,30 @@ function runCompression(job: VideoJob, quality: Quality) {
       ? "FFmpeg is not installed or FFMPEG_PATH is not configured."
       : "The video encoder could not be started.";
     setJobError(job, message, error.message);
+    releaseSlot();
   });
   child.once("close", async (code, signal) => {
-    if (failed || job.status !== "processing") return;
-    if (code !== 0) {
-      const errorMessage = signal === "SIGKILL"
-        ? "The video encoder was stopped by the server. Try a lower resolution or a shorter video; if it keeps happening, the processing service may be reaching its resource limit."
-        : /No space left on device/i.test(stderr)
-          ? "The processing service ran out of temporary storage. Please try again later or contact support."
-          : /Invalid data found when processing input|moov atom not found/i.test(stderr)
-            ? "FFmpeg could not read this video file. Try exporting it as MP4 or MOV and upload it again."
-            : "FFmpeg could not encode this video. Try another supported video file.";
-      const diagnostic = [
-        `exit code: ${code ?? "none"}`,
-        signal ? `signal: ${signal}` : undefined,
-        stderr.trim() || "FFmpeg produced no diagnostic output.",
-      ].filter(Boolean).join("\n");
-      setJobError(job, errorMessage, diagnostic);
+    if (failed || job.status !== "processing") {
+      releaseSlot();
       return;
     }
     try {
+      if (code !== 0) {
+        const errorMessage = signal === "SIGKILL"
+          ? "The video encoder was stopped by the server. Try a shorter video or a lower resolution; if it keeps happening, the processing service needs more memory."
+          : /No space left on device/i.test(stderr)
+            ? "The processing service ran out of temporary storage. Please try again later or contact support."
+            : /Invalid data found when processing input|moov atom not found/i.test(stderr)
+              ? "FFmpeg could not read this video file. Try exporting it as MP4 or MOV and upload it again."
+              : "FFmpeg could not encode this video. Try another supported video file.";
+        const diagnostic = [
+          `exit code: ${code ?? "none"}`,
+          signal ? `signal: ${signal}` : undefined,
+          stderr.trim() || "FFmpeg produced no diagnostic output.",
+        ].filter(Boolean).join("\n");
+        setJobError(job, errorMessage, diagnostic);
+        return;
+      }
       const output = await probeVideo(job.outputPath);
       if (output.codec !== "h264") throw new Error(`Expected H.264 output, found ${output.codec}.`);
       if (output.width !== job.input.width || output.height !== job.input.height) {
@@ -584,16 +599,24 @@ function runCompression(job: VideoJob, quality: Quality) {
         `The encoded video did not pass output verification. No file is available to download. ${detail}`,
         detail,
       );
+    } finally {
+      releaseSlot();
     }
   });
 }
 
 export async function createCompressionJob(request: NextRequest, ownerId: string) {
+  if (activeEncodings >= MAX_CONCURRENT_ENCODINGS) {
+    throw makeUploadError("The encoder is busy with another video. Please wait a few minutes and try again.", 429);
+  }
   if (!consumeRateLimit(request)) {
     throw makeUploadError("Upload limit reached. Please wait an hour before trying again.", 429);
   }
-  const tempDir = await mkdtemp(path.join(tmpdir(), "kyro-tools-"));
+  activeEncodings += 1;
+  let ownsEncodingSlot = true;
+  let tempDir: string | undefined;
   try {
+    tempDir = await mkdtemp(path.join(tmpdir(), "kyro-tools-"));
     const upload = await readUpload(request, tempDir);
     const input = await probeVideo(upload.uploadPath);
     const id = randomUUID();
@@ -613,10 +636,17 @@ export async function createCompressionJob(request: NextRequest, ownerId: string
       outputPath,
     };
     jobs.set(id, job);
-    void runCompression(job, upload.quality);
+    try {
+      runCompression(job, upload.quality);
+      ownsEncodingSlot = false;
+    } catch (error) {
+      jobs.delete(id);
+      throw error;
+    }
     return publicJob(job);
   } catch (error) {
-    await rm(tempDir, { recursive: true, force: true });
+    if (tempDir) await rm(tempDir, { recursive: true, force: true });
+    if (ownsEncodingSlot) activeEncodings -= 1;
     throw error;
   }
 }

@@ -66,7 +66,7 @@ Railway's job state and temporary video files are in process memory and temporar
 - Accepts MP4, MOV, MKV, and WebM uploads up to 1 GB.
 - Streams multipart uploads into randomly named files in the OS temporary directory; it does not load the whole upload into application memory.
 - Uses FFmpeg with H.264, `yuv420p`, AAC at 192 kbps, and `+faststart`. Maximum, High, and Balanced use CRF 18, 20, and 23 respectively.
-- Limits the H.264 encoder to two threads to reduce peak resource use on the processing service.
+- Uses the `veryfast` H.264 preset, one encoder/filter thread, and one active encode per Railway process to reduce peak resource use. A second upload receives a retry-later response while the encoder is occupied.
 - Optional sharpening (Off, Subtle, Strong) and color grading (Off, Natural, Vibrant) are disabled by default. They apply FFmpeg unsharp and mild contrast/saturation filters only when selected.
 - Resolution and frame-rate selectors accept original, 2160p, 1440p, 1080p, 720p, or 480p and original, 60, 30, or 24 FPS. The selected resolution is an upper bound, preserves aspect ratio and orientation, and never upscales; a selected frame rate is exact and uses FFmpeg's FPS filter to add or drop frames as required.
 - With original settings, FFmpeg does not scale, autorotate, or set a replacement frame rate. It runs in passthrough frame-rate mode and preserves orientation metadata; odd pixel dimensions are rejected instead of silently resized.
