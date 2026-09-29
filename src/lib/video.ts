@@ -47,6 +47,7 @@ export type VideoInfo = {
 
 export type VideoJob = {
   id: string;
+  ownerId: string;
   status: "processing" | "complete" | "error";
   progress: number;
   phase: string;
@@ -544,7 +545,7 @@ function runCompression(job: VideoJob, quality: Quality) {
   });
 }
 
-export async function createCompressionJob(request: NextRequest) {
+export async function createCompressionJob(request: NextRequest, ownerId: string) {
   if (!consumeRateLimit(request)) {
     throw makeUploadError("Upload limit reached. Please wait an hour before trying again.", 429);
   }
@@ -556,6 +557,7 @@ export async function createCompressionJob(request: NextRequest) {
     const outputPath = path.join(tempDir, `${randomUUID()}.mp4`);
     const job: VideoJob = {
       id,
+      ownerId,
       status: "processing",
       progress: 0,
       phase: "Encoding",

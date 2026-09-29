@@ -52,6 +52,8 @@ type Job = {
 };
 
 const MAX_FILE_SIZE = 1024 * 1024 * 1024;
+const videoApiOrigin = process.env.NEXT_PUBLIC_VIDEO_API_URL?.replace(/\/+$/, "") ?? "";
+let cachedApiToken: { token: string; expiresAt: number } | null = null;
 const qualities: { value: Quality; label: string; detail: string }[] = [
   { value: "maximum", label: "Maximum quality", detail: "CRF 18 · near-lossless" },
   { value: "high", label: "High quality", detail: "CRF 20 · smaller files" },
@@ -91,6 +93,26 @@ function formatDuration(seconds: number) {
 
 function formatFps(fps: number) {
   return Number.isInteger(fps) ? String(fps) : fps.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+async function getVideoApiToken(scope: "api" | "media" = "api", jobId?: string) {
+  if (!videoApiOrigin) return null;
+  if (scope === "api" && cachedApiToken && cachedApiToken.expiresAt * 1000 > Date.now() + 30_000) {
+    return cachedApiToken.token;
+  }
+
+  const response = await fetch("/api/video-token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scope, ...(jobId ? { jobId } : {}) }),
+    cache: "no-store",
+  });
+  const result = await response.json() as { token?: string; expiresAt?: number; error?: string };
+  if (!response.ok || !result.token || !result.expiresAt) {
+    throw new Error(result.error || "Could not authorize the video service.");
+  }
+  if (scope === "api") cachedApiToken = { token: result.token, expiresAt: result.expiresAt };
+  return result.token;
 }
 
 function Landscape({ compressed = false }: { compressed?: boolean }) {
@@ -208,6 +230,7 @@ export default function Workspace() {
   const [frameRate, setFrameRate] = useState<FrameRate>("original");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [job, setJob] = useState<Job | null>(null);
+  const [mediaToken, setMediaToken] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [localVideo, setLocalVideo] = useState<{ url: string; width: number; height: number; duration: number } | null>(null);
@@ -251,42 +274,57 @@ export default function Workspace() {
     setLocalVideo({ url, width: 0, height: 0, duration: 0 });
   }
 
-  function pollJob(id: string) {
-    fetch(`/api/jobs/${id}`, { cache: "no-store" })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Could not check compression status.");
-        setJob(data as Job);
-        if (data.status === "complete") {
-          setPhase("done");
-          return;
-        }
-        if (data.status === "error") {
-          setError(data.error || "Compression could not be completed.");
-          setPhase("error");
-          return;
-        }
-        pollTimer.current = setTimeout(() => pollJob(id), 800);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Could not check compression status.");
-        setPhase("error");
+  async function pollJob(id: string) {
+    try {
+      const token = await getVideoApiToken();
+      const response = await fetch(`${videoApiOrigin}/api/jobs/${id}`, {
+        cache: "no-store",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
+      const data = await response.json() as Job & { error?: string };
+      if (!response.ok) throw new Error(data.error || "Could not check compression status.");
+      setJob(data);
+      if (data.status === "complete") {
+        const accessToken = await getVideoApiToken("media", id);
+        setMediaToken(accessToken);
+        setPhase("done");
+        return;
+      }
+      if (data.status === "error") {
+        setError(data.error || "Compression could not be completed.");
+        setPhase("error");
+        return;
+      }
+      pollTimer.current = setTimeout(() => { void pollJob(id); }, 800);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not check compression status.");
+      setPhase("error");
+    }
   }
 
-  function startCompression() {
+  async function startCompression() {
     if (!file || phase === "uploading" || phase === "processing") return;
     setError("");
     setJob(null);
+    setMediaToken(null);
     setUploadProgress(0);
     setPhase("uploading");
+    let token: string | null;
+    try {
+      token = await getVideoApiToken();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not authorize the video service.");
+      setPhase("error");
+      return;
+    }
     const form = new FormData();
     form.append("video", file);
     form.append("quality", quality);
     form.append("resolution", resolution);
     form.append("frameRate", frameRate);
     const request = new XMLHttpRequest();
-    request.open("POST", "/api/compress");
+    request.open("POST", `${videoApiOrigin}/api/compress`);
+    if (token) request.setRequestHeader("Authorization", `Bearer ${token}`);
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) setUploadProgress(Math.round((event.loaded / event.total) * 100));
     };
@@ -322,6 +360,7 @@ export default function Workspace() {
     setFile(null);
     setLocalVideo(null);
     setJob(null);
+    setMediaToken(null);
     setError("");
     setUploadProgress(0);
     setPhase("idle");
@@ -334,6 +373,9 @@ export default function Workspace() {
   const savings = job?.compressedSize && job.originalSize
     ? Math.round((1 - job.compressedSize / job.originalSize) * 100)
     : 0;
+  const mediaQuery = mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : "";
+  const videoApiPath = (jobId: string, path: "video" | "download") =>
+    `${videoApiOrigin}/api/jobs/${jobId}/${path}${mediaQuery}`;
 
   return (
     <>
@@ -390,7 +432,7 @@ export default function Workspace() {
               {phase === "done" && job ? (
                 <div className="result-content">
                   <div className="result-heading"><span className="result-check"><CheckCircle2 size={20} /></span><div><h3>Your video is ready.</h3><p>Verified output, ready to download.</p></div></div>
-                  <video className="result-video" controls playsInline src={`/api/jobs/${job.id}/video`} />
+                  <video className="result-video" controls playsInline src={videoApiPath(job.id, "video")} />
                   <div className="result-stats">
                     <div><span>ORIGINAL SIZE</span><strong>{formatBytes(job.originalSize)}</strong></div>
                     <div><span>COMPRESSED</span><strong>{formatBytes(job.compressedSize ?? 0)}</strong></div>
@@ -402,7 +444,7 @@ export default function Workspace() {
                   </div>
                   <div className="verified-line"><Check size={14} /> FFprobe verified the output against your selected settings</div>
                   <div className="result-actions">
-                    <a className="button button-primary result-download" href={`/api/jobs/${job.id}/download`}><ArrowDownToLine size={16} /> Download video</a>
+                    <a className="button button-primary result-download" href={videoApiPath(job.id, "download")}><ArrowDownToLine size={16} /> Download video</a>
                     <button className="button button-secondary" onClick={reset}>Compress another</button>
                   </div>
                 </div>

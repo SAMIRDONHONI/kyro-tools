@@ -39,7 +39,27 @@ npm run build
 npm start
 ```
 
-Do not deploy the processing routes to a serverless or edge-only host: the FFmpeg job continues after the upload request returns and requires a persistent Node.js process. Job state is held in memory, so use one application instance behind a trusted HTTPS reverse proxy. Configure the proxy to set and overwrite `X-Real-IP`; upload rate limiting uses that header. The built-in limit is five uploads per IP per hour.
+Do not run video processing through serverless functions or an external proxy. The upload is sent directly from the browser to a persistent Node.js service; that service starts FFmpeg after the upload and keeps job state in memory. Run one Railway replica so upload, status, and video requests reach the same process. Configure a trusted reverse proxy to set and overwrite `X-Real-IP`; upload rate limiting uses that header. The built-in limit is five uploads per IP per hour.
+
+### Deploy the website on Vercel with video processing on Railway
+
+The GitHub repository can be connected to both services. Vercel serves the website and Discord sign-in. Railway builds the included `Dockerfile`, installs FFmpeg, and serves the video-processing API. The browser uploads directly to Railway; large video files do not pass through a Vercel Function. Railway's public service URL must be reachable over HTTPS.
+
+1. Import `SAMIRDONHONI/kyro-tools` as a Vercel project.
+2. Create a Railway service from the same GitHub repository. Railway detects the `Dockerfile`; generate a public domain and keep the service at one replica.
+3. Set these variables on Vercel:
+   - All Discord/Auth.js variables from `.env.example`.
+   - `VIDEO_API_TOKEN_SECRET`: a random secret of at least 32 characters.
+   - `NEXT_PUBLIC_VIDEO_API_URL`: the Railway service's HTTPS URL, with no trailing slash.
+4. Set these variables on Railway:
+   - `VIDEO_API_TOKEN_SECRET`: the exact same secret as Vercel.
+   - `VIDEO_ALLOWED_ORIGINS`: the exact HTTPS origin of the Vercel site (for example, `https://your-project.vercel.app`). Add custom domains as comma-separated origins.
+5. In the Discord Developer Portal, register `https://your-project.vercel.app/api/auth/callback/discord` as an OAuth2 redirect URI. Use your production domain instead if you have one.
+6. Redeploy both services after setting variables. Test sign-in, upload, processing, preview, and download on the Vercel URL.
+
+Vercel issues short-lived, signed access tokens only to Discord sessions with the required role. Railway validates those tokens and scopes jobs to their owner. Railway's API allows browser requests only from `VIDEO_ALLOWED_ORIGINS`. Keep `VIDEO_API_TOKEN_SECRET` private and identical on both hosts. Do not set Discord OAuth secrets on Railway.
+
+Railway's job state and temporary video files are in process memory and temporary storage, not a durable queue or video library. Use one replica; restarting or redeploying Railway removes active jobs and temporary outputs. Videos are still automatically deleted after one hour.
 
 ## Video processing
 
