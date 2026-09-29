@@ -13,7 +13,7 @@ export default function LegalPage({ title, intro, children }: LegalPageProps) {
       <header className="legal-header">
         <Link className="brand" href="/" aria-label="KYRO TOOLS home">
           <span className="brand-mark"><span /><span /><span /></span>
-          <span className="brand-name">KYRO<span>.</span></span>
+          <span className="brand-name">KYRO <span>TOOLS</span></span>
         </Link>
         <Link className="legal-home-link" href="/">Back to KYRO TOOLS</Link>
       </header>

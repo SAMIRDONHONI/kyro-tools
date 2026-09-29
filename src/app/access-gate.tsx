@@ -52,7 +52,7 @@ export default function AccessGate({ status, inviteUrl, username }: Props) {
       <div className="gate-card">
         <Link className="brand gate-brand" href="/" aria-label="KYRO Tools home">
           <span className="brand-mark"><span /><span /><span /></span>
-          <span className="brand-name">KYRO<span>.</span></span>
+          <span className="brand-name">KYRO <span>TOOLS</span></span>
         </Link>
 
         <div className="gate-emblem">

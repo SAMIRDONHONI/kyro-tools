@@ -198,7 +198,7 @@ function Header() {
       <div className="header-inner">
         <a className="brand" href="#" aria-label="Kyro Tools home">
           <span className="brand-mark"><span /><span /><span /></span>
-          <span className="brand-name">KYRO<span>.</span></span>
+          <span className="brand-name">KYRO <span>TOOLS</span></span>
         </a>
         <span className="engine-badge"><span /> VIDEO ENGINE</span>
         <nav className={`main-nav ${menuOpen ? "main-nav-open" : ""}`} aria-label="Main navigation">
@@ -579,7 +579,7 @@ export default function Workspace() {
         </section>
       </main>
       <footer className="site-footer section-shell" id="guide">
-        <a className="brand footer-brand" href="#top"><span className="brand-mark"><span /><span /><span /></span><span className="brand-name">KYRO<span>.</span></span></a>
+        <a className="brand footer-brand" href="#top"><span className="brand-mark"><span /><span /><span /></span><span className="brand-name">KYRO <span>TOOLS</span></span></a>
         <span>Thoughtful video compression for creators.</span>
         <div className="footer-meta"><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><span>YOUR VIDEOS ARE AUTOMATICALLY DELETED</span><span>© 2026 KYRO TOOLS</span></div>
       </footer>
