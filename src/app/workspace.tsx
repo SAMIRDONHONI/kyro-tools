@@ -433,7 +433,9 @@ export default function Workspace() {
               {phase === "done" && job ? (
                 <div className="result-content">
                   <div className="result-heading"><span className="result-check"><CheckCircle2 size={20} /></span><div><h3>Your video is ready.</h3><p>Verified output, ready to download.</p></div></div>
-                  <video className="result-video" controls playsInline src={videoApiPath(job.id, "video")} />
+                  <div className="portrait-video-frame">
+                    <video controls playsInline src={videoApiPath(job.id, "video")} />
+                  </div>
                   <div className="result-stats">
                     <div><span>ORIGINAL SIZE</span><strong>{formatBytes(job.originalSize)}</strong></div>
                     <div><span>COMPRESSED</span><strong>{formatBytes(job.compressedSize ?? 0)}</strong></div>
@@ -453,7 +455,9 @@ export default function Workspace() {
                 <div className="processing-content">
                   {phase === "processing" && job && localVideo && (
                     <div className="processing-preview">
-                      <video src={localVideo.url} controls playsInline preload="metadata" />
+                      <div className="portrait-video-frame">
+                        <video src={localVideo.url} controls playsInline preload="metadata" />
+                      </div>
                       <div><span>{job.input.width} × {job.input.height}</span><i /><span>{formatFps(job.input.fps)} FPS</span><i /><span>{formatDuration(job.input.duration)}</span><i /><span>{job.input.codec.toUpperCase()}</span></div>
                     </div>
                   )}
@@ -485,7 +489,7 @@ export default function Workspace() {
                     />
                     {file ? (
                       <div className="selected-file-content">
-                        {localVideo?.width ? <video className="selection-preview" src={localVideo.url} controls playsInline preload="metadata" /> : <span className="selection-loading"><FileVideo2 size={20} /> Reading video preview…</span>}
+                        {localVideo?.width ? <div className="portrait-video-frame"><video src={localVideo.url} controls playsInline preload="metadata" /></div> : <span className="selection-loading"><FileVideo2 size={20} /> Reading video preview…</span>}
                         <div className="selected-file">
                           <div className="selected-file-icon"><FileVideo2 size={23} /></div>
                           <div className="selected-file-copy"><strong>{file.name}</strong><span>{formatBytes(file.size)} <i /> {localVideo?.width ? `${localVideo.width} × ${localVideo.height}` : "Reading video details"}</span></div>
