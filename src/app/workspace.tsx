@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -576,7 +577,7 @@ export default function Workspace() {
       <footer className="site-footer section-shell" id="guide">
         <a className="brand footer-brand" href="#top"><span className="brand-mark"><span /><span /><span /></span><span className="brand-name">KYRO<span>.</span></span></a>
         <span>Thoughtful video compression for creators.</span>
-        <div className="footer-meta"><span>YOUR VIDEOS ARE AUTOMATICALLY DELETED</span><span>© 2026 KYRO TOOLS</span></div>
+        <div className="footer-meta"><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><span>YOUR VIDEOS ARE AUTOMATICALLY DELETED</span><span>© 2026 KYRO TOOLS</span></div>
       </footer>
     </>
   );
