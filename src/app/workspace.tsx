@@ -543,7 +543,7 @@ export default function Workspace() {
                     <label className="setting-row" htmlFor="output-frame-rate"><span><span className="setting-icon"><Gauge size={15} /></span>Frame rate</span><span className="setting-select-wrap"><select id="output-frame-rate" className="setting-select" value={frameRate} onChange={(event) => setFrameRate(event.target.value as FrameRate)} disabled={settingsDisabled} aria-label="Output frame rate">{frameRateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
                     <div className="setting-row"><span><span className="setting-icon"><AudioLines size={15} /></span>Audio</span><strong>High quality AAC <ChevronDown size={14} /></strong></div>
                   </div>
-                  <div className="settings-footnote"><Check size={13} /> Resolution won’t upscale; the selected FPS is exact.</div>
+                  <div className="settings-footnote"><Check size={13} /> Output target: {resolution === "original" ? "keep original resolution" : `up to ${selectedLabel(resolutionOptions, resolution)}`} · {frameRate === "original" ? "keep original FPS" : selectedLabel(frameRateOptions, frameRate)}. Smaller videos won’t upscale.</div>
                   <button className="button button-primary start-button" onClick={startCompression} disabled={!file || phase !== "idle"}>
                     Start compression <ArrowRight size={16} />
                   </button>

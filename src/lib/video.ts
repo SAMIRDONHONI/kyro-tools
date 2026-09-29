@@ -479,10 +479,15 @@ function runCompression(job: VideoJob, quality: Quality) {
       : "The video encoder could not be started.";
     setJobError(job, message, error.message);
   });
-  child.once("close", async (code) => {
+  child.once("close", async (code, signal) => {
     if (failed || job.status !== "processing") return;
     if (code !== 0) {
-      setJobError(job, "FFmpeg could not encode this video. Try another supported video file.", stderr.trim());
+      const diagnostic = [
+        `exit code: ${code ?? "none"}`,
+        signal ? `signal: ${signal}` : undefined,
+        stderr.trim() || "FFmpeg produced no diagnostic output.",
+      ].filter(Boolean).join("\n");
+      setJobError(job, "FFmpeg could not encode this video. Try another supported video file.", diagnostic);
       return;
     }
     try {
