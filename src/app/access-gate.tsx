@@ -37,7 +37,7 @@ export default function AccessGate({ status, inviteUrl, username }: Props) {
 
   async function continueWithDiscord() {
     setSigningIn(true);
-    await signIn("discord", { redirectTo: "/" });
+    await signIn("discord", { redirectTo: "/" }, { prompt: "consent" });
   }
 
   const setupRequired = status === "setup_required";

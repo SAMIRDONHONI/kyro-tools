@@ -30,7 +30,7 @@ Copy `.env.example` to `.env.local`, then set:
 
 Register the exact local URL `http://127.0.0.1:3100/api/auth/callback/discord` in the Discord application's OAuth2 redirect URIs to use this preview. For the default development port, use `http://localhost:3000/api/auth/callback/discord`. In production, register the matching HTTPS callback URL and set the same environment variables on the host.
 
-The Discord OAuth flow requests only `identify` and `guilds.members.read`. No bot token is needed: the signed-in account is used to ask Discord whether it belongs to the configured server and which roles it currently has. Visitors see the server invite and sign-in screen; server members without the required role see a waiting screen with a recheck button. Assign the role in Discord to grant access. The homepage and every upload, status, preview, and download API verify access server-side; membership and role checks are cached for no more than one second.
+The Discord OAuth flow requests `identify`, `guilds.members.read`, and `guilds`. No bot token is needed: the signed-in account is used to ask Discord whether it belongs to the configured server, which roles it currently has, and whether it owns that server. The configured server owner can access the workspace without the creator role; everyone else still needs a configured role. Visitors see the server invite and sign-in screen; server members without the required role see a waiting screen with a recheck button. The homepage and every upload, status, preview, and download API verify access server-side; membership and role checks are cached for no more than one second. After adding the `guilds` scope, sign out and sign in again and approve the requested permission.
 
 For a production build:
 

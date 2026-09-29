@@ -2,6 +2,7 @@ import "server-only";
 import type { AccessStatus } from "./discord-shared";
 
 type Member = { roles?: string[] };
+type GuildSummary = { id?: unknown; owner?: unknown };
 type CachedStatus = { status: AccessStatus; expiresAt: number };
 
 const SNOWFLAKE_PATTERN = /^\d{17,20}$/;
@@ -82,6 +83,45 @@ export async function verifyDiscordMembership(
     } else if (response.ok) {
       const member = await response.json() as Member;
       status = member.roles?.includes(roleId) ? "authorized" : "missing_role";
+      if (status === "missing_role") {
+        const guildsResponse = await fetch(
+          "https://discord.com/api/v10/users/@me/guilds?limit=200",
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            cache: "no-store",
+            signal: AbortSignal.timeout(3_000),
+          },
+        );
+
+        if (guildsResponse.status === 429) {
+          const retryAfterSeconds = Number(
+            guildsResponse.headers.get("retry-after") ??
+            guildsResponse.headers.get("x-ratelimit-reset-after"),
+          );
+          const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? Math.ceil(retryAfterSeconds * 1_000)
+            : RATE_LIMIT_CACHE_TTL_MS;
+          const cacheDurationMs = Math.max(RATE_LIMIT_CACHE_TTL_MS, retryAfterMs);
+          accessCache.set(userId, { status: "rate_limited", expiresAt: now + cacheDurationMs });
+          console.error(`Discord owner verification was rate-limited; retrying after ${Math.ceil(cacheDurationMs / 1_000)} seconds.`);
+          return "rate_limited";
+        }
+        if (guildsResponse.status === 401 || guildsResponse.status === 403) {
+          console.error("Discord owner verification was denied; reauthenticate and approve the guilds OAuth scope.");
+          return "unavailable";
+        }
+        if (!guildsResponse.ok) {
+          console.error(`Discord owner verification failed with HTTP ${guildsResponse.status}.`);
+          return "unavailable";
+        }
+
+        const guilds: unknown = await guildsResponse.json();
+        const ownsConfiguredGuild = Array.isArray(guilds) && guilds.some((guild: GuildSummary) =>
+          guild !== null && typeof guild === "object" &&
+          guild.id === guildId && guild.owner === true,
+        );
+        if (ownsConfiguredGuild) status = "authorized";
+      }
     } else {
       console.error(`Discord membership verification failed with HTTP ${response.status}.`);
       return "unavailable";

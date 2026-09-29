@@ -12,7 +12,7 @@ export const {
     Discord({
       clientId: process.env.AUTH_DISCORD_ID ?? "",
       clientSecret: process.env.AUTH_DISCORD_SECRET ?? "",
-      authorization: { params: { scope: "identify guilds.members.read" } },
+      authorization: { params: { scope: "identify guilds.members.read guilds" } },
     }),
   ],
   session: { strategy: "jwt", maxAge: 60 * 60 * 24 * 7 },
