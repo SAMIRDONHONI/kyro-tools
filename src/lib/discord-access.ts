@@ -15,10 +15,12 @@ function accessError(status: AccessStatus, request?: Request) {
       ? "Join the KYRO Discord server before using this feature."
       : status === "missing_role"
         ? "You need the creator access role in the KYRO Discord server."
+        : status === "rate_limited"
+          ? "Discord is temporarily rate-limiting role checks. Please wait a minute and try again."
         : status === "setup_required"
           ? "Discord access has not been configured."
           : "Discord access could not be verified. Try again.";
-  const httpStatus = status === "unauthenticated" ? 401 : status === "unavailable" || status === "setup_required" ? 503 : 403;
+  const httpStatus = status === "unauthenticated" ? 401 : status === "unavailable" || status === "rate_limited" || status === "setup_required" ? 503 : 403;
   const response = Response.json({ error: message, status }, {
     status: httpStatus,
     headers: { "Cache-Control": "no-store" },

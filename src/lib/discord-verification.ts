@@ -6,6 +6,7 @@ type CachedStatus = { status: AccessStatus; expiresAt: number };
 
 const SNOWFLAKE_PATTERN = /^\d{17,20}$/;
 const CACHE_TTL_MS = 1_000;
+const RATE_LIMIT_CACHE_TTL_MS = 60_000;
 const accessCache = new Map<string, CachedStatus>();
 const INVITE_URL = process.env.DISCORD_INVITE_URL || "https://discord.gg/N8c5m2QA8A";
 
@@ -66,6 +67,18 @@ export async function verifyDiscordMembership(
     } else if (response.status === 403) {
       console.error("Discord membership verification was denied; ensure the OAuth app requests guilds.members.read.");
       return "unavailable";
+    } else if (response.status === 429) {
+      const retryAfterSeconds = Number(
+        response.headers.get("retry-after") ??
+        response.headers.get("x-ratelimit-reset-after"),
+      );
+      const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? Math.ceil(retryAfterSeconds * 1_000)
+        : RATE_LIMIT_CACHE_TTL_MS;
+      const cacheDurationMs = Math.max(RATE_LIMIT_CACHE_TTL_MS, retryAfterMs);
+      accessCache.set(userId, { status: "rate_limited", expiresAt: now + cacheDurationMs });
+      console.error(`Discord membership verification was rate-limited; retrying after ${Math.ceil(cacheDurationMs / 1_000)} seconds.`);
+      return "rate_limited";
     } else if (response.ok) {
       const member = await response.json() as Member;
       status = member.roles?.includes(roleId) ? "authorized" : "missing_role";

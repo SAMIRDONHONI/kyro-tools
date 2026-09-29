@@ -22,7 +22,7 @@ export default async function Home() {
 
   const status = session.accessStatus;
   if (status !== "authorized") {
-    return <AccessGate status={status} inviteUrl={inviteUrl} username={session.user.name} />;
+    return <AccessGate key={status} status={status} inviteUrl={inviteUrl} username={session.user.name} />;
   }
 
   return <Workspace />;

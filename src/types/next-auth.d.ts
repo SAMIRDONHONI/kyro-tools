@@ -8,6 +8,7 @@ declare module "next-auth" {
       | "not_member"
       | "missing_role"
       | "authorized"
+      | "rate_limited"
       | "unavailable";
   }
 }

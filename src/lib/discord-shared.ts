@@ -4,4 +4,5 @@ export type AccessStatus =
   | "not_member"
   | "missing_role"
   | "authorized"
+  | "rate_limited"
   | "unavailable";

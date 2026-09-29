@@ -3,7 +3,7 @@
 import { signIn, signOut } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, LockKeyhole, RefreshCw, ShieldCheck, Users, Zap } from "lucide-react";
 import type { AccessStatus } from "@/lib/discord-shared";
 
@@ -17,9 +17,20 @@ export default function AccessGate({ status, inviteUrl, username }: Props) {
   const router = useRouter();
   const [checking, setChecking] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
+  const [retrySeconds, setRetrySeconds] = useState(status === "rate_limited" ? 60 : 0);
+
+  useEffect(() => {
+    if (status !== "rate_limited") return;
+
+    const interval = window.setInterval(() => {
+      setRetrySeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1_000);
+    return () => window.clearInterval(interval);
+  }, [status]);
 
   async function verifyRole() {
     setChecking(true);
+    if (status === "rate_limited") setRetrySeconds(60);
     router.refresh();
     window.setTimeout(() => setChecking(false), 1_500);
   }
@@ -33,6 +44,7 @@ export default function AccessGate({ status, inviteUrl, username }: Props) {
   const notSignedIn = status === "unauthenticated";
   const notMember = status === "not_member";
   const missingRole = status === "missing_role";
+  const rateLimited = status === "rate_limited";
   const unavailable = status === "unavailable";
 
   return (
@@ -44,7 +56,7 @@ export default function AccessGate({ status, inviteUrl, username }: Props) {
         </Link>
 
         <div className="gate-emblem">
-          {setupRequired ? <LockKeyhole size={24} /> : notMember ? <Users size={25} /> : missingRole ? <ShieldCheck size={25} /> : unavailable ? <RefreshCw size={24} /> : <Zap size={24} />}
+          {setupRequired ? <LockKeyhole size={24} /> : notMember ? <Users size={25} /> : missingRole ? <ShieldCheck size={25} /> : unavailable || rateLimited ? <RefreshCw size={24} /> : <Zap size={24} />}
         </div>
 
         <span className="gate-kicker"><span className="live-dot" /> CREATOR ACCESS</span>
@@ -53,6 +65,7 @@ export default function AccessGate({ status, inviteUrl, username }: Props) {
           {notSignedIn && "Join the server. Get the role. Create."}
           {notMember && "Join our Discord to continue."}
           {missingRole && "You’re in. One role away."}
+          {rateLimited && "Discord is cooling down."}
           {unavailable && "We couldn’t verify your role."}
         </h1>
         <p className="gate-description">
@@ -60,6 +73,7 @@ export default function AccessGate({ status, inviteUrl, username }: Props) {
           {notSignedIn && "KYRO TOOLS is reserved for our Discord community. Join the server, connect your Discord account, and get the creator access role."}
           {notMember && "You’re signed in, but your Discord account hasn’t joined the server yet. Join first, then come back to verify."}
           {missingRole && "You’ve joined the server. Ask a moderator to give you the creator access role, then check your role again."}
+          {rateLimited && "Discord temporarily rate-limited role checks. Wait a minute, then try again. Your role assignment has not changed."}
           {unavailable && "The Discord server couldn’t be reached right now. Your access stays locked until we can confirm your role."}
         </p>
 
@@ -105,6 +119,12 @@ export default function AccessGate({ status, inviteUrl, username }: Props) {
         {unavailable && (
           <button className="button button-primary gate-action" onClick={verifyRole} disabled={checking}>
             {checking ? "Checking Discord…" : "Try again"} <RefreshCw size={14} />
+          </button>
+        )}
+
+        {rateLimited && (
+          <button className="button button-primary gate-action" onClick={verifyRole} disabled={checking || retrySeconds > 0}>
+            {retrySeconds > 0 ? `Try again in ${retrySeconds}s` : checking ? "Checking Discord…" : "Try again"} <RefreshCw size={14} />
           </button>
         )}
 
