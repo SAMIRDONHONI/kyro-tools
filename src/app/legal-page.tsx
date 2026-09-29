@@ -24,7 +24,7 @@ export default function LegalPage({ title, intro, children }: LegalPageProps) {
         <p className="legal-updated">Effective date: September 30, 2026</p>
         <div className="legal-sections">{children}</div>
         <p className="legal-contact">
-          Questions about this page? Contact KYRO TOOLS through our{" "}
+          Questions about this page? Contact KYRO TOOLS on Discord at <strong>@kyrodadaa</strong> via our{" "}
           <a href="https://discord.gg/N8c5m2QA8A" target="_blank" rel="noreferrer">Discord server</a>.
         </p>
       </article>

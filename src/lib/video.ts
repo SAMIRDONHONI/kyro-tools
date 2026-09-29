@@ -21,10 +21,14 @@ const FFPROBE_PATH = process.env.FFPROBE_PATH || "ffprobe";
 export type Quality = "maximum" | "high" | "balanced";
 export type Resolution = "original" | "2160" | "1440" | "1080" | "720" | "480";
 export type FrameRate = "original" | "60" | "30" | "24";
+export type Sharpening = "off" | "subtle" | "strong";
+export type ColorGrade = "off" | "natural" | "vibrant";
 
 type CompressionSettings = {
   resolution: Resolution;
   frameRate: FrameRate;
+  sharpening: Sharpening;
+  colorGrade: ColorGrade;
 };
 
 const RESOLUTION_BOUNDS: Record<Exclude<Resolution, "original">, [number, number]> = {
@@ -138,6 +142,14 @@ function isResolution(value: string): value is Resolution {
 
 function isFrameRate(value: string): value is FrameRate {
   return value === "original" || value === "60" || value === "30" || value === "24";
+}
+
+function isSharpening(value: string): value is Sharpening {
+  return value === "off" || value === "subtle" || value === "strong";
+}
+
+function isColorGrade(value: string): value is ColorGrade {
+  return value === "off" || value === "natural" || value === "vibrant";
 }
 
 function fraction(value?: string) {
@@ -284,13 +296,18 @@ async function readUpload(request: NextRequest, tempDir: string) {
 
   const parser = Busboy({
     headers: { "content-type": contentType },
-    limits: { fileSize: MAX_FILE_SIZE, files: 1, fields: 3, fieldSize: 32 },
+    limits: { fileSize: MAX_FILE_SIZE, files: 1, fields: 5, fieldSize: 32 },
   });
   let uploadPath = "";
   let originalName = "";
   let originalSize = 0;
   let quality: Quality = "maximum";
-  const settings: CompressionSettings = { resolution: "original", frameRate: "original" };
+  const settings: CompressionSettings = {
+    resolution: "original",
+    frameRate: "original",
+    sharpening: "off",
+    colorGrade: "off",
+  };
   const receivedFields = new Set<string>();
   let fileTask: Promise<void> | undefined;
   let uploadFailure: UploadError | undefined;
@@ -314,6 +331,10 @@ async function readUpload(request: NextRequest, tempDir: string) {
         settings.resolution = value;
       } else if (fieldName === "frameRate" && isFrameRate(value)) {
         settings.frameRate = value;
+      } else if (fieldName === "sharpening" && isSharpening(value)) {
+        settings.sharpening = value;
+      } else if (fieldName === "colorGrade" && isColorGrade(value)) {
+        settings.colorGrade = value;
       } else {
         uploadFailure = makeUploadError("The compression settings are invalid.");
       }
@@ -422,6 +443,16 @@ function runCompression(job: VideoJob, quality: Quality) {
   if (job.settings.resolution !== "original") {
     filters.push(`scale=w='min(iw,${targetWidth})':h='min(ih,${targetHeight})':force_original_aspect_ratio=decrease:force_divisible_by=2`);
   }
+  if (job.settings.sharpening !== "off") {
+    const amount = job.settings.sharpening === "subtle" ? "0.35" : "0.7";
+    filters.push(`unsharp=5:5:${amount}:3:3:0`);
+  }
+  if (job.settings.colorGrade !== "off") {
+    const [contrast, saturation] = job.settings.colorGrade === "natural"
+      ? ["1.03", "1.06"]
+      : ["1.08", "1.16"];
+    filters.push(`eq=contrast=${contrast}:saturation=${saturation}`);
+  }
   const targetFrameRate = job.settings.frameRate === "original" ? undefined : Number(job.settings.frameRate);
   const hasFrameRateSelection = targetFrameRate !== undefined;
   if (hasFrameRateSelection) filters.push(`fps=${targetFrameRate}`);
@@ -431,7 +462,7 @@ function runCompression(job: VideoJob, quality: Quality) {
     "-i", job.inputPath,
     "-map", "0:v:0", "-map", "0:a?",
     "-map_metadata", "0",
-    "-c:v", "libx264", "-preset", "medium", "-crf", crf,
+    "-c:v", "libx264", "-preset", "medium", "-crf", crf, "-threads:v", "2",
     ...(filters.length ? ["-vf", filters.join(",")] : []),
     "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
     "-c:a", "aac", "-b:a", "192k",
@@ -482,12 +513,19 @@ function runCompression(job: VideoJob, quality: Quality) {
   child.once("close", async (code, signal) => {
     if (failed || job.status !== "processing") return;
     if (code !== 0) {
+      const errorMessage = signal === "SIGKILL"
+        ? "The video encoder was stopped by the server. Try a lower resolution or a shorter video; if it keeps happening, the processing service may be reaching its resource limit."
+        : /No space left on device/i.test(stderr)
+          ? "The processing service ran out of temporary storage. Please try again later or contact support."
+          : /Invalid data found when processing input|moov atom not found/i.test(stderr)
+            ? "FFmpeg could not read this video file. Try exporting it as MP4 or MOV and upload it again."
+            : "FFmpeg could not encode this video. Try another supported video file.";
       const diagnostic = [
         `exit code: ${code ?? "none"}`,
         signal ? `signal: ${signal}` : undefined,
         stderr.trim() || "FFmpeg produced no diagnostic output.",
       ].filter(Boolean).join("\n");
-      setJobError(job, "FFmpeg could not encode this video. Try another supported video file.", diagnostic);
+      setJobError(job, errorMessage, diagnostic);
       return;
     }
     try {

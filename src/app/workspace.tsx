@@ -28,7 +28,14 @@ type Phase = "idle" | "uploading" | "processing" | "done" | "error";
 type Quality = "maximum" | "high" | "balanced";
 type Resolution = "original" | "2160" | "1440" | "1080" | "720" | "480";
 type FrameRate = "original" | "60" | "30" | "24";
-type CompressionSettings = { resolution: Resolution; frameRate: FrameRate };
+type Sharpening = "off" | "subtle" | "strong";
+type ColorGrade = "off" | "natural" | "vibrant";
+type CompressionSettings = {
+  resolution: Resolution;
+  frameRate: FrameRate;
+  sharpening: Sharpening;
+  colorGrade: ColorGrade;
+};
 
 type VideoInfo = {
   width: number;
@@ -73,6 +80,16 @@ const frameRateOptions: { value: FrameRate; label: string }[] = [
   { value: "60", label: "60 FPS" },
   { value: "30", label: "30 FPS" },
   { value: "24", label: "24 FPS" },
+];
+const sharpeningOptions: { value: Sharpening; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "subtle", label: "Subtle" },
+  { value: "strong", label: "Strong" },
+];
+const colorGradeOptions: { value: ColorGrade; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "natural", label: "Natural" },
+  { value: "vibrant", label: "Vibrant" },
 ];
 
 function selectedLabel<T extends string>(options: { value: T; label: string }[], value: T) {
@@ -229,6 +246,8 @@ export default function Workspace() {
   const [quality, setQuality] = useState<Quality>("maximum");
   const [resolution, setResolution] = useState<Resolution>("original");
   const [frameRate, setFrameRate] = useState<FrameRate>("original");
+  const [sharpening, setSharpening] = useState<Sharpening>("off");
+  const [colorGrade, setColorGrade] = useState<ColorGrade>("off");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [job, setJob] = useState<Job | null>(null);
   const [mediaToken, setMediaToken] = useState<string | null>(null);
@@ -323,6 +342,8 @@ export default function Workspace() {
     form.append("quality", quality);
     form.append("resolution", resolution);
     form.append("frameRate", frameRate);
+    form.append("sharpening", sharpening);
+    form.append("colorGrade", colorGrade);
     const request = new XMLHttpRequest();
     request.open("POST", `${videoApiOrigin}/api/compress`);
     if (token) request.setRequestHeader("Authorization", `Bearer ${token}`);
@@ -526,6 +547,8 @@ export default function Workspace() {
                   <div className="output-row"><span>Frame-rate setting</span><strong>{selectedLabel(frameRateOptions, job?.settings.frameRate ?? "original")}</strong></div>
                   <div className="output-row"><span>Video codec</span><strong>{job?.output?.codec.toUpperCase()}</strong></div>
                   <div className="output-row"><span>Audio</span><strong>AAC · 192 kbps</strong></div>
+                  <div className="output-row"><span>Sharpening</span><strong>{selectedLabel(sharpeningOptions, job?.settings.sharpening ?? "off")}</strong></div>
+                  <div className="output-row"><span>Color grade</span><strong>{selectedLabel(colorGradeOptions, job?.settings.colorGrade ?? "off")}</strong></div>
                   <div className="private-callout"><LockKeyhole size={15} /><span><strong>Your file stays yours.</strong><br />It will be automatically deleted after 1 hour.</span></div>
                 </div>
               ) : (
@@ -545,9 +568,11 @@ export default function Workspace() {
                   <div className="setting-group technical-settings">
                     <label className="setting-row" htmlFor="output-resolution"><span><span className="setting-icon"><Clapperboard size={15} /></span>Resolution</span><span className="setting-select-wrap"><select id="output-resolution" className="setting-select" value={resolution} onChange={(event) => setResolution(event.target.value as Resolution)} disabled={settingsDisabled} aria-label="Output resolution">{resolutionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
                     <label className="setting-row" htmlFor="output-frame-rate"><span><span className="setting-icon"><Gauge size={15} /></span>Frame rate</span><span className="setting-select-wrap"><select id="output-frame-rate" className="setting-select" value={frameRate} onChange={(event) => setFrameRate(event.target.value as FrameRate)} disabled={settingsDisabled} aria-label="Output frame rate">{frameRateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
+                    <label className="setting-row" htmlFor="output-sharpening"><span><span className="setting-icon"><Sparkles size={15} /></span>Sharpen</span><span className="setting-select-wrap"><select id="output-sharpening" className="setting-select" value={sharpening} onChange={(event) => setSharpening(event.target.value as Sharpening)} disabled={settingsDisabled} aria-label="Sharpening strength">{sharpeningOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
+                    <label className="setting-row" htmlFor="output-color-grade"><span><span className="setting-icon"><Sparkles size={15} /></span>Color grade</span><span className="setting-select-wrap"><select id="output-color-grade" className="setting-select" value={colorGrade} onChange={(event) => setColorGrade(event.target.value as ColorGrade)} disabled={settingsDisabled} aria-label="Color grading">{colorGradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
                     <div className="setting-row"><span><span className="setting-icon"><AudioLines size={15} /></span>Audio</span><strong>High quality AAC <ChevronDown size={14} /></strong></div>
                   </div>
-                  <div className="settings-footnote"><Check size={13} /> Output target: {resolution === "original" ? "keep original resolution" : `up to ${selectedLabel(resolutionOptions, resolution)}`} · {frameRate === "original" ? "keep original FPS" : selectedLabel(frameRateOptions, frameRate)}. Smaller videos won’t upscale.</div>
+                  <div className="settings-footnote"><Check size={13} /> Output target: {resolution === "original" ? "keep original resolution" : `up to ${selectedLabel(resolutionOptions, resolution)}`} · {frameRate === "original" ? "keep original FPS" : selectedLabel(frameRateOptions, frameRate)}. Smaller videos won’t upscale. Sharpening and color grading are optional and off by default.</div>
                   <button className="button button-primary start-button" onClick={startCompression} disabled={!file || phase !== "idle"}>
                     Start compression <ArrowRight size={16} />
                   </button>
@@ -581,7 +606,7 @@ export default function Workspace() {
       <footer className="site-footer section-shell" id="guide">
         <a className="brand footer-brand" href="#top"><span className="brand-mark"><span /><span /><span /></span><span className="brand-name">KYRO <span>TOOLS</span></span></a>
         <span>Thoughtful video compression for creators.</span>
-        <div className="footer-meta"><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><span>YOUR VIDEOS ARE AUTOMATICALLY DELETED</span><span>© 2026 KYRO TOOLS</span></div>
+        <div className="footer-meta"><a href="https://discord.gg/N8c5m2QA8A" target="_blank" rel="noreferrer">Discord · @kyrodadaa</a><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><span>YOUR VIDEOS ARE AUTOMATICALLY DELETED</span><span>© 2026 KYRO TOOLS</span></div>
       </footer>
     </>
   );

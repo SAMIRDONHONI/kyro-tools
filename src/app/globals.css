@@ -2267,6 +2267,17 @@ button {
   background: var(--lime-dark);
 }
 
+.gate-footer a {
+  color: #a8c65a;
+  letter-spacing: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gate-footer a:hover {
+  color: var(--lime);
+}
+
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(16px); }
   to { opacity: 1; transform: translateY(0); }

@@ -134,7 +134,7 @@ export default function AccessGate({ status, inviteUrl, username }: Props) {
 
         <div className="gate-footnote"><LockKeyhole size={13} /><span>Every page and video endpoint checks your Discord role.<br />Your files stay private and are automatically deleted.</span></div>
       </div>
-      <footer className="gate-footer"><span>KYRO TOOLS</span><i /> PRIVATE VIDEO COMPRESSION FOR CREATORS <Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link></footer>
+      <footer className="gate-footer"><span>KYRO TOOLS</span><i /> PRIVATE VIDEO COMPRESSION FOR CREATORS <a href="https://discord.gg/N8c5m2QA8A" target="_blank" rel="noreferrer">Contact @kyrodadaa</a><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link></footer>
     </main>
   );
 }
