@@ -43,6 +43,8 @@ type VideoInfo = {
   fps: number;
   duration: number;
   codec: string;
+  bitrate?: number;
+  dynamicRange: "SDR" | "HDR" | "Unknown";
 };
 
 type Job = {
@@ -111,6 +113,13 @@ function formatDuration(seconds: number) {
 
 function formatFps(fps: number) {
   return Number.isInteger(fps) ? String(fps) : fps.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function formatBitrate(bitrate?: number) {
+  if (!bitrate || !Number.isFinite(bitrate)) return "Unknown";
+  if (bitrate >= 1_000_000) return `${(bitrate / 1_000_000).toFixed(1)} Mbps`;
+  if (bitrate < 1_000) return `${Math.round(bitrate)} bps`;
+  return `${Math.round(bitrate / 1_000)} kbps`;
 }
 
 async function getVideoApiToken(scope: "api" | "media" = "api", jobId?: string) {
@@ -391,6 +400,7 @@ export default function Workspace() {
   }
 
   const currentProgress = phase === "uploading" ? uploadProgress : job?.progress ?? 0;
+  const queued = phase === "processing" && job?.phase === "Queued for encoding";
   const settingsDisabled = phase === "uploading" || phase === "processing";
   const savings = job?.compressedSize && job.originalSize
     ? Math.round((1 - job.compressedSize / job.originalSize) * 100)
@@ -465,6 +475,8 @@ export default function Workspace() {
                     <div><span>FRAME RATE</span><strong>{formatFps(job.output?.fps ?? 0)} FPS</strong></div>
                     <div><span>DURATION</span><strong>{formatDuration(job.output?.duration ?? 0)}</strong></div>
                     <div><span>VIDEO CODEC</span><strong>{job.output?.codec.toUpperCase()}</strong></div>
+                    <div><span>BITRATE</span><strong>{formatBitrate(job.output?.bitrate)}</strong></div>
+                    <div><span>DYNAMIC RANGE</span><strong>{job.output?.dynamicRange ?? "Unknown"}</strong></div>
                   </div>
                   <div className="verified-line"><Check size={14} /> FFprobe verified the output against your selected settings</div>
                   <div className="result-actions">
@@ -483,16 +495,16 @@ export default function Workspace() {
                     </div>
                   )}
                   <div className="processing-art"><div className="processing-ring"><Clapperboard size={28} strokeWidth={1.3} /></div><span className="processing-orbit orbit-one" /><span className="processing-orbit orbit-two" /></div>
-                  <span className="processing-kicker">{phase === "uploading" ? "SECURE UPLOAD" : "KYRO ENCODER"}</span>
-                  <h3>{phase === "uploading" ? "Uploading your video..." : "Optimizing your video..."}</h3>
-                  <p>{phase === "uploading" ? "Sending your file securely to the encoder." : "Applying your resolution and frame-rate settings."}</p>
-                  <div className="progress-meta"><span>{phase === "uploading" ? "UPLOAD PROGRESS" : "ENCODING PROGRESS"}</span><strong>{currentProgress}%</strong></div>
+                  <span className="processing-kicker">{phase === "uploading" ? "SECURE UPLOAD" : queued ? "ENCODER QUEUE" : "KYRO ENCODER"}</span>
+                  <h3>{phase === "uploading" ? "Uploading your video..." : queued ? "Waiting for an encoder..." : "Optimizing your video..."}</h3>
+                  <p>{phase === "uploading" ? "Sending your file securely to the encoder." : queued ? "Your video is uploaded and will start as soon as the current video finishes." : "Applying your resolution and frame-rate settings."}</p>
+                  <div className="progress-meta"><span>{phase === "uploading" ? "UPLOAD PROGRESS" : queued ? "QUEUE STATUS" : "ENCODING PROGRESS"}</span><strong>{queued ? "Queued" : `${currentProgress}%`}</strong></div>
                   <div className="progress-track"><span style={{ width: `${currentProgress}%` }} /></div>
                   <div className="processing-details">
                     <span>{job ? `${job.input.width} × ${job.input.height} · ${formatFps(job.input.fps)} FPS` : file?.name}</span>
                     <span>{phase === "uploading" ? formatBytes(file?.size ?? 0) : job?.phase || "Preparing encoder"}</span>
                   </div>
-                  <div className="processing-status"><span className="live-dot" /> {phase === "uploading" ? "Transferring file" : "Encoding · FFmpeg"}</div>
+                  <div className="processing-status"><span className="live-dot" /> {phase === "uploading" ? "Transferring file" : queued ? "Queued · waiting for encoder" : "Encoding · FFmpeg"}</div>
                 </div>
               ) : (
                 <>
@@ -516,7 +528,7 @@ export default function Workspace() {
                           <div className="selected-file-copy"><strong>{file.name}</strong><span>{formatBytes(file.size)} <i /> {localVideo?.width ? `${localVideo.width} × ${localVideo.height}` : "Reading video details"}</span></div>
                           <button className="remove-file" type="button" aria-label="Remove selected video" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setFile(null); setLocalVideo(null); if (videoUrl.current) URL.revokeObjectURL(videoUrl.current); videoUrl.current = null; if (fileInput.current) fileInput.current.value = ""; }}><X size={17} /></button>
                         </div>
-                        <div className="selection-details"><span>Resolution <strong>{localVideo?.width ? `${localVideo.width} × ${localVideo.height}` : "Reading…"}</strong></span><span>Duration <strong>{localVideo?.duration ? formatDuration(localVideo.duration) : "Reading…"}</strong></span><span>Frame rate <strong>{job ? `${formatFps(job.input.fps)} FPS` : "Read on upload"}</strong></span><span>Codec <strong>{job?.input.codec.toUpperCase() ?? "Read on upload"}</strong></span></div>
+                        <div className="selection-details"><span>Resolution <strong>{localVideo?.width ? `${localVideo.width} × ${localVideo.height}` : "Reading…"}</strong></span><span>Duration <strong>{localVideo?.duration ? formatDuration(localVideo.duration) : "Reading…"}</strong></span><span>Frame rate <strong>{job ? `${formatFps(job.input.fps)} FPS` : "Read on upload"}</strong></span><span>Codec <strong>{job?.input.codec.toUpperCase() ?? "Read on upload"}</strong></span><span>Bitrate <strong>{job ? formatBitrate(job.input.bitrate) : "Read on upload"}</strong></span><span>Dynamic range <strong>{job?.input.dynamicRange ?? "Read on upload"}</strong></span></div>
                       </div>
                     ) : (
                       <>
@@ -546,6 +558,10 @@ export default function Workspace() {
                   <div className="output-row"><span>Resolution setting</span><strong>{selectedLabel(resolutionOptions, job?.settings.resolution ?? "original")}</strong></div>
                   <div className="output-row"><span>Frame-rate setting</span><strong>{selectedLabel(frameRateOptions, job?.settings.frameRate ?? "original")}</strong></div>
                   <div className="output-row"><span>Video codec</span><strong>{job?.output?.codec.toUpperCase()}</strong></div>
+                  <div className="output-row"><span>Bitrate</span><strong>{formatBitrate(job?.output?.bitrate)}</strong></div>
+                  <div className="output-row"><span>Dynamic range</span><strong>{job?.output?.dynamicRange ?? "Unknown"}</strong></div>
+                  <div className="output-row"><span>Original bitrate</span><strong>{formatBitrate(job?.input.bitrate)}</strong></div>
+                  <div className="output-row"><span>Original dynamic range</span><strong>{job?.input.dynamicRange ?? "Unknown"}</strong></div>
                   <div className="output-row"><span>Audio</span><strong>AAC · 192 kbps</strong></div>
                   <div className="output-row"><span>Sharpening</span><strong>{selectedLabel(sharpeningOptions, job?.settings.sharpening ?? "off")}</strong></div>
                   <div className="output-row"><span>Color grade</span><strong>{selectedLabel(colorGradeOptions, job?.settings.colorGrade ?? "off")}</strong></div>

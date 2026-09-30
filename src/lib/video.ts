@@ -14,17 +14,20 @@ const MAX_REQUEST_OVERHEAD = 1024 * 1024;
 const JOB_TTL_MS = 60 * 60 * 1000;
 const MAX_UPLOADS_PER_HOUR = 5;
 const MAX_CONCURRENT_ENCODINGS = 1;
+const MAX_ACTIVE_JOBS = 3;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 const RATE_LIMITS = new Map<string, number[]>();
 const FFMPEG_PATH = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE_PATH = process.env.FFPROBE_PATH || "ffprobe";
 let activeEncodings = 0;
+let activeJobs = 0;
 
 export type Quality = "maximum" | "high" | "balanced";
 export type Resolution = "original" | "2160" | "1440" | "1080" | "720" | "480";
 export type FrameRate = "original" | "60" | "30" | "24";
 export type Sharpening = "off" | "subtle" | "strong";
 export type ColorGrade = "off" | "natural" | "vibrant";
+export type VideoDynamicRange = "SDR" | "HDR" | "Unknown";
 
 type CompressionSettings = {
   resolution: Resolution;
@@ -47,6 +50,8 @@ export type VideoInfo = {
   fps: number;
   duration: number;
   codec: string;
+  bitrate?: number;
+  dynamicRange: VideoDynamicRange;
   frameCount?: number;
   rotation?: number;
 };
@@ -76,19 +81,22 @@ type ProbeStream = {
   avg_frame_rate?: string;
   r_frame_rate?: string;
   duration?: string;
+  bit_rate?: string;
   nb_frames?: string;
+  color_transfer?: string;
   tags?: { rotate?: string };
   side_data_list?: { rotation?: number }[];
 };
 
 type ProbeOutput = {
   streams?: ProbeStream[];
-  format?: { duration?: string };
+  format?: { duration?: string; bit_rate?: string };
 };
 
 type UploadError = Error & { status?: number };
 
 const jobs = new Map<string, VideoJob>();
+const encodingQueue: { job: VideoJob; quality: Quality }[] = [];
 
 async function* webStreamChunks(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader();
@@ -167,6 +175,29 @@ function frameRate(stream: ProbeStream) {
   return Math.round(rate * 1000) / 1000;
 }
 
+function positiveNumber(value?: string) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function dynamicRange(colorTransfer?: string): VideoDynamicRange {
+  switch (colorTransfer?.toLowerCase()) {
+    case "smpte2084":
+    case "arib-std-b67":
+      return "HDR";
+    case "bt709":
+    case "bt470m":
+    case "bt470bg":
+    case "smpte170m":
+    case "smpte240m":
+    case "bt2020-10":
+    case "iec61966-2-1":
+      return "SDR";
+    default:
+      return "Unknown";
+  }
+}
+
 function normalizeRotation(rotation?: number) {
   if (rotation === undefined || !Number.isFinite(rotation)) return 0;
   return ((Math.round(rotation) % 360) + 360) % 360;
@@ -180,7 +211,7 @@ function executeProbe(filePath: string): Promise<ProbeOutput> {
       [
         "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "stream=codec_name,width,height,avg_frame_rate,r_frame_rate,duration,nb_frames:stream_tags=rotate:stream_side_data=rotation:format=duration",
+        "-show_entries", "stream=codec_name,width,height,avg_frame_rate,r_frame_rate,duration,bit_rate,nb_frames,color_transfer:stream_tags=rotate:stream_side_data=rotation:format=duration,bit_rate",
         "-of", "json",
         filePath,
       ],
@@ -222,12 +253,16 @@ export async function probeVideo(filePath: string): Promise<VideoInfo> {
   ) {
     throw makeUploadError("The uploaded file does not contain a supported video stream.", 422);
   }
+  const bitrate = positiveNumber(stream.bit_rate) ?? positiveNumber(probe.format?.bit_rate)
+    ?? Math.round((await stat(filePath)).size * 8 / duration);
   return {
     width: stream.width!,
     height: stream.height!,
     fps,
     duration,
     codec: stream.codec_name,
+    bitrate,
+    dynamicRange: dynamicRange(stream.color_transfer),
     frameCount: Number.isSafeInteger(frameCount) && frameCount > 0 ? frameCount : undefined,
     rotation: stream.side_data_list?.find((sideData) => Number.isFinite(sideData.rotation))?.rotation
       ?? (stream.tags?.rotate ? Number(stream.tags.rotate) : undefined),
@@ -424,12 +459,31 @@ function setJobError(job: VideoJob, message: string, detail?: string) {
   scheduleCleanup(job.id);
 }
 
+function startNextEncoding() {
+  while (activeEncodings < MAX_CONCURRENT_ENCODINGS && encodingQueue.length > 0) {
+    const queued = encodingQueue.shift()!;
+    if (queued.job.status !== "processing") continue;
+    activeEncodings += 1;
+    queued.job.phase = "Encoding";
+    try {
+      runCompression(queued.job, queued.quality);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown encoder startup failure.";
+      setJobError(queued.job, "The video encoder could not be started.", detail);
+      activeEncodings -= 1;
+      activeJobs -= 1;
+    }
+  }
+}
+
 function runCompression(job: VideoJob, quality: Quality) {
   let slotReleased = false;
   const releaseSlot = () => {
     if (slotReleased) return;
     slotReleased = true;
     activeEncodings -= 1;
+    activeJobs -= 1;
+    startNextEncoding();
   };
 
   if (job.input.width % 2 !== 0 || job.input.height % 2 !== 0) {
@@ -606,14 +660,14 @@ function runCompression(job: VideoJob, quality: Quality) {
 }
 
 export async function createCompressionJob(request: NextRequest, ownerId: string) {
-  if (activeEncodings >= MAX_CONCURRENT_ENCODINGS) {
-    throw makeUploadError("The encoder is busy with another video. Please wait a few minutes and try again.", 429);
+  if (activeJobs >= MAX_ACTIVE_JOBS) {
+    throw makeUploadError("The video processing queue is full. Please try again in a few minutes.", 429);
   }
   if (!consumeRateLimit(request)) {
     throw makeUploadError("Upload limit reached. Please wait an hour before trying again.", 429);
   }
-  activeEncodings += 1;
-  let ownsEncodingSlot = true;
+  activeJobs += 1;
+  let ownsJobSlot = true;
   let tempDir: string | undefined;
   try {
     tempDir = await mkdtemp(path.join(tmpdir(), "kyro-tools-"));
@@ -626,7 +680,7 @@ export async function createCompressionJob(request: NextRequest, ownerId: string
       ownerId,
       status: "processing",
       progress: 0,
-      phase: "Encoding",
+      phase: "Queued for encoding",
       input,
       originalName: upload.originalName,
       originalSize: upload.originalSize,
@@ -636,17 +690,13 @@ export async function createCompressionJob(request: NextRequest, ownerId: string
       outputPath,
     };
     jobs.set(id, job);
-    try {
-      runCompression(job, upload.quality);
-      ownsEncodingSlot = false;
-    } catch (error) {
-      jobs.delete(id);
-      throw error;
-    }
+    encodingQueue.push({ job, quality: upload.quality });
+    ownsJobSlot = false;
+    startNextEncoding();
     return publicJob(job);
   } catch (error) {
+    if (ownsJobSlot) activeJobs -= 1;
     if (tempDir) await rm(tempDir, { recursive: true, force: true });
-    if (ownsEncodingSlot) activeEncodings -= 1;
     throw error;
   }
 }
