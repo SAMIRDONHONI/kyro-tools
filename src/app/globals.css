@@ -1418,6 +1418,55 @@ button {
   letter-spacing: .07em;
 }
 
+.bitrate-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bitrate-input-wrap input {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid #36382e;
+  border-radius: 6px;
+  background: #151611;
+  color: #e8e9e1;
+  font-size: 11px;
+}
+
+.bitrate-input-wrap input:focus-visible {
+  border-color: #9bbd50;
+  outline: 2px solid rgb(208 243 106 / 22%);
+  outline-offset: 1px;
+}
+
+.bitrate-input-wrap input[aria-invalid="true"] {
+  border-color: #a65f53;
+}
+
+.bitrate-input-wrap input:disabled {
+  color: #92948a;
+  cursor: wait;
+  opacity: .7;
+}
+
+.bitrate-input-wrap > span {
+  color: #a4a69b;
+  font-size: 9px;
+}
+
+.bitrate-help {
+  margin: 7px 0 0;
+  color: #85877d;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.bitrate-help-error {
+  color: #e08b7d;
+}
+
 .technical-settings {
   display: flex;
   flex-direction: column;

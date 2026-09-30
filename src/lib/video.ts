@@ -23,6 +23,7 @@ let activeEncodings = 0;
 let activeJobs = 0;
 
 export type Quality = "maximum" | "high" | "balanced";
+export type RateControl = "quality" | "bitrate";
 export type Resolution = "original" | "2160" | "1440" | "1080" | "720" | "480";
 export type FrameRate = "original" | "60" | "30" | "24";
 export type Sharpening = "off" | "subtle" | "strong";
@@ -30,6 +31,9 @@ export type ColorGrade = "off" | "natural" | "vibrant";
 export type VideoDynamicRange = "SDR" | "HDR" | "Unknown";
 
 type CompressionSettings = {
+  quality: Quality;
+  rateControl: RateControl;
+  videoBitrateKbps: number;
   resolution: Resolution;
   frameRate: FrameRate;
   sharpening: Sharpening;
@@ -96,7 +100,7 @@ type ProbeOutput = {
 type UploadError = Error & { status?: number };
 
 const jobs = new Map<string, VideoJob>();
-const encodingQueue: { job: VideoJob; quality: Quality }[] = [];
+const encodingQueue: VideoJob[] = [];
 
 async function* webStreamChunks(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader();
@@ -144,6 +148,10 @@ function makeUploadError(message: string, status = 400): UploadError {
 
 function isQuality(value: string): value is Quality {
   return value === "maximum" || value === "high" || value === "balanced";
+}
+
+function isRateControl(value: string): value is RateControl {
+  return value === "quality" || value === "bitrate";
 }
 
 function isResolution(value: string): value is Resolution {
@@ -333,13 +341,15 @@ async function readUpload(request: NextRequest, tempDir: string) {
 
   const parser = Busboy({
     headers: { "content-type": contentType },
-    limits: { fileSize: MAX_FILE_SIZE, files: 1, fields: 5, fieldSize: 32 },
+    limits: { fileSize: MAX_FILE_SIZE, files: 1, fields: 7, fieldSize: 32 },
   });
   let uploadPath = "";
   let originalName = "";
   let originalSize = 0;
-  let quality: Quality = "maximum";
   const settings: CompressionSettings = {
+    quality: "maximum",
+    rateControl: "quality",
+    videoBitrateKbps: 5_000,
     resolution: "original",
     frameRate: "original",
     sharpening: "off",
@@ -363,7 +373,16 @@ async function readUpload(request: NextRequest, tempDir: string) {
         receivedFields.add(fieldName);
       }
       if (fieldName === "quality" && isQuality(value)) {
-        quality = value;
+        settings.quality = value;
+      } else if (fieldName === "rateControl" && isRateControl(value)) {
+        settings.rateControl = value;
+      } else if (fieldName === "videoBitrateKbps" && /^\d+$/.test(value)) {
+        const bitrate = Number(value);
+        if (bitrate >= 100 && bitrate <= 100_000) {
+          settings.videoBitrateKbps = bitrate;
+        } else {
+          uploadFailure = makeUploadError("Target video bitrate must be between 100 and 100,000 kbps.");
+        }
       } else if (fieldName === "resolution" && isResolution(value)) {
         settings.resolution = value;
       } else if (fieldName === "frameRate" && isFrameRate(value)) {
@@ -416,7 +435,7 @@ async function readUpload(request: NextRequest, tempDir: string) {
   await validateContainer(uploadPath, path.extname(originalName).slice(1).toLowerCase());
   originalSize = (await stat(uploadPath)).size;
   if (originalSize === 0) throw makeUploadError("The uploaded video file is empty.");
-  return { uploadPath, originalName, originalSize, quality, settings };
+  return { uploadPath, originalName, originalSize, settings };
 }
 
 function publicJob(job: VideoJob) {
@@ -461,22 +480,22 @@ function setJobError(job: VideoJob, message: string, detail?: string) {
 
 function startNextEncoding() {
   while (activeEncodings < MAX_CONCURRENT_ENCODINGS && encodingQueue.length > 0) {
-    const queued = encodingQueue.shift()!;
-    if (queued.job.status !== "processing") continue;
+    const job = encodingQueue.shift()!;
+    if (job.status !== "processing") continue;
     activeEncodings += 1;
-    queued.job.phase = "Encoding";
+    job.phase = "Encoding";
     try {
-      runCompression(queued.job, queued.quality);
+      runCompression(job);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unknown encoder startup failure.";
-      setJobError(queued.job, "The video encoder could not be started.", detail);
+      setJobError(job, "The video encoder could not be started.", detail);
       activeEncodings -= 1;
       activeJobs -= 1;
     }
   }
 }
 
-function runCompression(job: VideoJob, quality: Quality) {
+function runCompression(job: VideoJob) {
   let slotReleased = false;
   const releaseSlot = () => {
     if (slotReleased) return;
@@ -492,7 +511,7 @@ function runCompression(job: VideoJob, quality: Quality) {
     return;
   }
 
-  const crf = quality === "maximum" ? "18" : quality === "high" ? "20" : "23";
+  const crf = job.settings.quality === "maximum" ? "18" : job.settings.quality === "high" ? "20" : "23";
   const filters: string[] = [];
   const maxHeight = job.settings.resolution === "original"
     ? job.input.height
@@ -527,7 +546,11 @@ function runCompression(job: VideoJob, quality: Quality) {
     "-map", "0:v:0", "-map", "0:a?",
     "-map_metadata", "0",
     "-filter_threads", "1",
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, "-threads:v", "1",
+    "-c:v", "libx264", "-preset", "veryfast",
+    ...(job.settings.rateControl === "bitrate"
+      ? ["-b:v", `${job.settings.videoBitrateKbps}k`]
+      : ["-crf", crf]),
+    "-threads:v", "1",
     ...(filters.length ? ["-vf", filters.join(",")] : []),
     "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
     "-c:a", "aac", "-b:a", "192k",
@@ -690,7 +713,7 @@ export async function createCompressionJob(request: NextRequest, ownerId: string
       outputPath,
     };
     jobs.set(id, job);
-    encodingQueue.push({ job, quality: upload.quality });
+    encodingQueue.push(job);
     ownsJobSlot = false;
     startNextEncoding();
     return publicJob(job);

@@ -26,11 +26,15 @@ import { useEffect, useRef, useState } from "react";
 
 type Phase = "idle" | "uploading" | "processing" | "done" | "error";
 type Quality = "maximum" | "high" | "balanced";
+type RateControl = "quality" | "bitrate";
 type Resolution = "original" | "2160" | "1440" | "1080" | "720" | "480";
 type FrameRate = "original" | "60" | "30" | "24";
 type Sharpening = "off" | "subtle" | "strong";
 type ColorGrade = "off" | "natural" | "vibrant";
 type CompressionSettings = {
+  quality: Quality;
+  rateControl: RateControl;
+  videoBitrateKbps: number;
   resolution: Resolution;
   frameRate: FrameRate;
   sharpening: Sharpening;
@@ -253,6 +257,8 @@ export default function Workspace() {
   const [file, setFile] = useState<File | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [quality, setQuality] = useState<Quality>("maximum");
+  const [rateControl, setRateControl] = useState<RateControl>("quality");
+  const [videoBitrateKbps, setVideoBitrateKbps] = useState("5000");
   const [resolution, setResolution] = useState<Resolution>("original");
   const [frameRate, setFrameRate] = useState<FrameRate>("original");
   const [sharpening, setSharpening] = useState<Sharpening>("off");
@@ -349,6 +355,8 @@ export default function Workspace() {
     const form = new FormData();
     form.append("video", file);
     form.append("quality", quality);
+    form.append("rateControl", rateControl);
+    form.append("videoBitrateKbps", videoBitrateKbps);
     form.append("resolution", resolution);
     form.append("frameRate", frameRate);
     form.append("sharpening", sharpening);
@@ -401,6 +409,9 @@ export default function Workspace() {
 
   const currentProgress = phase === "uploading" ? uploadProgress : job?.progress ?? 0;
   const queued = phase === "processing" && job?.phase === "Queued for encoding";
+  const validBitrate = /^\d+$/.test(videoBitrateKbps)
+    && Number(videoBitrateKbps) >= 100
+    && Number(videoBitrateKbps) <= 100_000;
   const settingsDisabled = phase === "uploading" || phase === "processing";
   const savings = job?.compressedSize && job.originalSize
     ? Math.round((1 - job.compressedSize / job.originalSize) * 100)
@@ -557,6 +568,7 @@ export default function Workspace() {
                   <div className="output-row"><span>Frame rate</span><strong>{formatFps(job?.output?.fps ?? 0)} FPS</strong></div>
                   <div className="output-row"><span>Resolution setting</span><strong>{selectedLabel(resolutionOptions, job?.settings.resolution ?? "original")}</strong></div>
                   <div className="output-row"><span>Frame-rate setting</span><strong>{selectedLabel(frameRateOptions, job?.settings.frameRate ?? "original")}</strong></div>
+                  <div className="output-row"><span>Rate control</span><strong>{job?.settings.rateControl === "bitrate" ? `Target ${formatBitrate((job.settings.videoBitrateKbps ?? 0) * 1_000)}` : `${selectedLabel(qualities, job?.settings.quality ?? "maximum")} · CRF ${job?.settings.quality === "maximum" ? "18" : job?.settings.quality === "high" ? "20" : "23"}`}</strong></div>
                   <div className="output-row"><span>Video codec</span><strong>{job?.output?.codec.toUpperCase()}</strong></div>
                   <div className="output-row"><span>Bitrate</span><strong>{formatBitrate(job?.output?.bitrate)}</strong></div>
                   <div className="output-row"><span>Dynamic range</span><strong>{job?.output?.dynamicRange ?? "Unknown"}</strong></div>
@@ -570,17 +582,41 @@ export default function Workspace() {
               ) : (
                 <>
                   <div className="setting-group">
-                    <div className="setting-label"><span>Compression quality</span><span className="setting-hint">CHOOSE YOUR BALANCE</span></div>
+                    <div className="setting-label"><span>Rate control</span><span className="setting-hint">CHOOSE YOUR METHOD</span></div>
                     <div className="quality-options">
-                      {qualities.map((option) => (
-                        <button key={option.value} className={`quality-option ${quality === option.value ? "quality-option-active" : ""}`} onClick={() => setQuality(option.value)} disabled={phase !== "idle"} aria-pressed={quality === option.value}>
-                          <span className="quality-radio">{quality === option.value && <i />}</span>
-                          <span className="quality-copy"><strong>{option.label}</strong><small>{option.detail}</small></span>
-                          {option.value === "maximum" && <span className="recommended-tag">BEST DETAIL</span>}
-                        </button>
-                      ))}
+                      <button className={`quality-option ${rateControl === "quality" ? "quality-option-active" : ""}`} onClick={() => setRateControl("quality")} disabled={phase !== "idle"} aria-pressed={rateControl === "quality"}>
+                        <span className="quality-radio">{rateControl === "quality" && <i />}</span>
+                        <span className="quality-copy"><strong>Quality (CRF)</strong><small>Choose a visual quality level</small></span>
+                      </button>
+                      <button className={`quality-option ${rateControl === "bitrate" ? "quality-option-active" : ""}`} onClick={() => setRateControl("bitrate")} disabled={phase !== "idle"} aria-pressed={rateControl === "bitrate"}>
+                        <span className="quality-radio">{rateControl === "bitrate" && <i />}</span>
+                        <span className="quality-copy"><strong>Target bitrate</strong><small>Set an average video bitrate</small></span>
+                      </button>
                     </div>
                   </div>
+                  {rateControl === "quality" ? (
+                    <div className="setting-group">
+                      <div className="setting-label"><span>Compression quality</span><span className="setting-hint">CHOOSE YOUR BALANCE</span></div>
+                      <div className="quality-options">
+                        {qualities.map((option) => (
+                          <button key={option.value} className={`quality-option ${quality === option.value ? "quality-option-active" : ""}`} onClick={() => setQuality(option.value)} disabled={phase !== "idle"} aria-pressed={quality === option.value}>
+                            <span className="quality-radio">{quality === option.value && <i />}</span>
+                            <span className="quality-copy"><strong>{option.label}</strong><small>{option.detail}</small></span>
+                            {option.value === "maximum" && <span className="recommended-tag">BEST DETAIL</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="setting-group bitrate-setting">
+                      <label className="setting-label" htmlFor="video-bitrate"><span>Target video bitrate</span><span className="setting-hint">100–100,000 KBPS</span></label>
+                      <div className="bitrate-input-wrap">
+                        <input id="video-bitrate" type="number" min="100" max="100000" step="100" value={videoBitrateKbps} onChange={(event) => setVideoBitrateKbps(event.target.value)} disabled={settingsDisabled} aria-invalid={!validBitrate} aria-label="Target video bitrate in kilobits per second" />
+                        <span>kbps</span>
+                      </div>
+                      <p className={`bitrate-help ${validBitrate ? "" : "bitrate-help-error"}`}>{validBitrate ? "Sets the average video bitrate; actual results can vary with video content." : "Enter a whole-number bitrate from 100 to 100,000 kbps."}</p>
+                    </div>
+                  )}
                   <div className="setting-group technical-settings">
                     <label className="setting-row" htmlFor="output-resolution"><span><span className="setting-icon"><Clapperboard size={15} /></span>Resolution</span><span className="setting-select-wrap"><select id="output-resolution" className="setting-select" value={resolution} onChange={(event) => setResolution(event.target.value as Resolution)} disabled={settingsDisabled} aria-label="Output resolution">{resolutionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
                     <label className="setting-row" htmlFor="output-frame-rate"><span><span className="setting-icon"><Gauge size={15} /></span>Frame rate</span><span className="setting-select-wrap"><select id="output-frame-rate" className="setting-select" value={frameRate} onChange={(event) => setFrameRate(event.target.value as FrameRate)} disabled={settingsDisabled} aria-label="Output frame rate">{frameRateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
@@ -588,8 +624,8 @@ export default function Workspace() {
                     <label className="setting-row" htmlFor="output-color-grade"><span><span className="setting-icon"><Sparkles size={15} /></span>Color grade</span><span className="setting-select-wrap"><select id="output-color-grade" className="setting-select" value={colorGrade} onChange={(event) => setColorGrade(event.target.value as ColorGrade)} disabled={settingsDisabled} aria-label="Color grading">{colorGradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
                     <div className="setting-row"><span><span className="setting-icon"><AudioLines size={15} /></span>Audio</span><strong>High quality AAC <ChevronDown size={14} /></strong></div>
                   </div>
-                  <div className="settings-footnote"><Check size={13} /> Output target: {resolution === "original" ? "keep original resolution" : `up to ${selectedLabel(resolutionOptions, resolution)}`} · {frameRate === "original" ? "keep original FPS" : selectedLabel(frameRateOptions, frameRate)}. Smaller videos won’t upscale. Sharpening and color grading are optional and off by default.</div>
-                  <button className="button button-primary start-button" onClick={startCompression} disabled={!file || phase !== "idle"}>
+                  <div className="settings-footnote"><Check size={13} /> {rateControl === "bitrate" ? `Average video bitrate target: ${formatBitrate(Number(videoBitrateKbps) * 1_000)}. Actual bitrate can vary with video content.` : "CRF targets visual quality; lower values preserve more detail."} Output target: {resolution === "original" ? "keep original resolution" : `up to ${selectedLabel(resolutionOptions, resolution)}`} · {frameRate === "original" ? "keep original FPS" : selectedLabel(frameRateOptions, frameRate)}. Smaller videos won’t upscale. Sharpening and color grading are optional and off by default.</div>
+                  <button className="button button-primary start-button" onClick={startCompression} disabled={!file || phase !== "idle" || (rateControl === "bitrate" && !validBitrate)}>
                     Start compression <ArrowRight size={16} />
                   </button>
                   <div className="settings-lock"><LockKeyhole size={12} /> Your original is never modified.</div>
