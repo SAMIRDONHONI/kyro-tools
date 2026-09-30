@@ -259,7 +259,7 @@ export default function Workspace() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [quality, setQuality] = useState<Quality>("maximum");
   const [rateControl, setRateControl] = useState<RateControl>("quality");
-  const [videoBitrateKbps, setVideoBitrateKbps] = useState("5000");
+  const [videoBitrateMbps, setVideoBitrateMbps] = useState("5");
   const [resolution, setResolution] = useState<Resolution>("original");
   const [frameRate, setFrameRate] = useState<FrameRate>("original");
   const [sharpening, setSharpening] = useState<Sharpening>("off");
@@ -357,7 +357,7 @@ export default function Workspace() {
     form.append("video", file);
     form.append("quality", quality);
     form.append("rateControl", rateControl);
-    form.append("videoBitrateKbps", videoBitrateKbps);
+    form.append("videoBitrateKbps", String(Math.round(Number(videoBitrateMbps) * 1_000)));
     form.append("resolution", resolution);
     form.append("frameRate", frameRate);
     form.append("sharpening", sharpening);
@@ -410,9 +410,9 @@ export default function Workspace() {
 
   const currentProgress = phase === "uploading" ? uploadProgress : job?.progress ?? 0;
   const queued = phase === "processing" && job?.phase === "Queued for encoding";
-  const validBitrate = /^\d+$/.test(videoBitrateKbps)
-    && Number(videoBitrateKbps) >= 100
-    && Number(videoBitrateKbps) <= 100_000;
+  const validBitrate = /^\d+(?:\.\d{1,3})?$/.test(videoBitrateMbps)
+    && Number(videoBitrateMbps) >= 0.1
+    && Number(videoBitrateMbps) <= 100;
   const settingsDisabled = phase === "uploading" || phase === "processing";
   const savings = job?.compressedSize && job.originalSize
     ? Math.round((1 - job.compressedSize / job.originalSize) * 100)
@@ -610,12 +610,12 @@ export default function Workspace() {
                     </div>
                   ) : (
                     <div className="setting-group bitrate-setting">
-                      <label className="setting-label" htmlFor="video-bitrate"><span>Target video bitrate</span><span className="setting-hint">100–100,000 KBPS</span></label>
+                      <label className="setting-label" htmlFor="video-bitrate"><span>Target video bitrate</span><span className="setting-hint">0.1–100 MBPS</span></label>
                       <div className="bitrate-input-wrap">
-                        <input id="video-bitrate" type="number" min="100" max="100000" step="100" value={videoBitrateKbps} onChange={(event) => setVideoBitrateKbps(event.target.value)} disabled={settingsDisabled} aria-invalid={!validBitrate} aria-label="Target video bitrate in kilobits per second" />
-                        <span>kbps</span>
+                        <input id="video-bitrate" type="number" min="0.1" max="100" step="0.1" value={videoBitrateMbps} onChange={(event) => setVideoBitrateMbps(event.target.value)} disabled={settingsDisabled} aria-invalid={!validBitrate} aria-label="Target video bitrate in megabits per second" />
+                        <span>Mbps</span>
                       </div>
-                      <p className={`bitrate-help ${validBitrate ? "" : "bitrate-help-error"}`}>{validBitrate ? "Sets the average video bitrate; actual results can vary with video content." : "Enter a whole-number bitrate from 100 to 100,000 kbps."}</p>
+                      <p className={`bitrate-help ${validBitrate ? "" : "bitrate-help-error"}`}>{validBitrate ? "Sets the average video bitrate; actual results can vary with video content." : "Enter a bitrate from 0.1 to 100 Mbps, with up to 3 decimal places."}</p>
                     </div>
                   )}
                   <div className="setting-group technical-settings">
@@ -625,7 +625,7 @@ export default function Workspace() {
                     <label className="setting-row" htmlFor="output-color-grade"><span><span className="setting-icon"><Sparkles size={15} /></span>Color grade</span><span className="setting-select-wrap"><select id="output-color-grade" className="setting-select" value={colorGrade} onChange={(event) => setColorGrade(event.target.value as ColorGrade)} disabled={settingsDisabled} aria-label="Color grading">{colorGradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
                     <div className="setting-row"><span><span className="setting-icon"><AudioLines size={15} /></span>Audio</span><strong>High quality AAC <ChevronDown size={14} /></strong></div>
                   </div>
-                  <div className="settings-footnote"><Check size={13} /> {rateControl === "bitrate" ? `Average video bitrate target: ${formatBitrate(Number(videoBitrateKbps) * 1_000)}. Actual bitrate can vary with video content.` : "CRF targets visual quality; lower values preserve more detail."} HDR sources stay HDR; SDR sources stay SDR. Output target: {resolution === "original" ? "keep original resolution" : `up to ${selectedLabel(resolutionOptions, resolution)}`} · {frameRate === "original" ? "keep original FPS" : selectedLabel(frameRateOptions, frameRate)}. Smaller videos won’t upscale. Sharpening and color grading are optional and off by default.</div>
+                  <div className="settings-footnote"><Check size={13} /> {rateControl === "bitrate" ? `Average video bitrate target: ${Number(videoBitrateMbps)} Mbps. Actual bitrate can vary with video content.` : "CRF targets visual quality; lower values preserve more detail."} HDR sources stay HDR; SDR sources stay SDR. Output target: {resolution === "original" ? "keep original resolution" : `up to ${selectedLabel(resolutionOptions, resolution)}`} · {frameRate === "original" ? "keep original FPS" : selectedLabel(frameRateOptions, frameRate)}. Smaller videos won’t upscale. Sharpening and color grading are optional and off by default.</div>
                   <button className="button button-primary start-button" onClick={startCompression} disabled={!file || phase !== "idle" || (rateControl === "bitrate" && !validBitrate)}>
                     Start compression <ArrowRight size={16} />
                   </button>
