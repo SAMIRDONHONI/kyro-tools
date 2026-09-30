@@ -562,11 +562,13 @@ function runCompression(job: VideoJob) {
   const args = [
     "-hide_banner", "-loglevel", "error", "-nostats", "-y",
     "-noautorotate",
+    "-threads:v", "1",
     "-i", job.inputPath,
     "-map", "0:v:0", "-map", "0:a?",
     "-map_metadata", "0",
     "-filter_threads", "1",
     "-c:v", "libx264", "-preset", "veryfast",
+    "-x264-params", "rc-lookahead=10:sync-lookahead=0:ref=2",
     ...(job.settings.rateControl === "bitrate"
       ? ["-b:v", `${job.settings.videoBitrateKbps}k`]
       : ["-crf", crf]),
@@ -631,7 +633,7 @@ function runCompression(job: VideoJob) {
     try {
       if (code !== 0) {
         const errorMessage = signal === "SIGKILL"
-          ? "The video encoder was stopped by the server. Try a shorter video or a lower resolution; if it keeps happening, the processing service needs more memory."
+          ? "The server stopped encoding, likely because the video exceeded available memory. Try 720p at 30 FPS; if it still happens, the processing service needs more memory."
           : /No space left on device/i.test(stderr)
             ? "The processing service ran out of temporary storage. Please try again later or contact support."
             : /Invalid data found when processing input|moov atom not found/i.test(stderr)
