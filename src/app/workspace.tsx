@@ -49,6 +49,7 @@ type VideoInfo = {
   codec: string;
   bitrate?: number;
   dynamicRange: "SDR" | "HDR" | "Unknown";
+  bitDepth: number;
 };
 
 type Job = {
@@ -539,7 +540,7 @@ export default function Workspace() {
                           <div className="selected-file-copy"><strong>{file.name}</strong><span>{formatBytes(file.size)} <i /> {localVideo?.width ? `${localVideo.width} × ${localVideo.height}` : "Reading video details"}</span></div>
                           <button className="remove-file" type="button" aria-label="Remove selected video" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setFile(null); setLocalVideo(null); if (videoUrl.current) URL.revokeObjectURL(videoUrl.current); videoUrl.current = null; if (fileInput.current) fileInput.current.value = ""; }}><X size={17} /></button>
                         </div>
-                        <div className="selection-details"><span>Resolution <strong>{localVideo?.width ? `${localVideo.width} × ${localVideo.height}` : "Reading…"}</strong></span><span>Duration <strong>{localVideo?.duration ? formatDuration(localVideo.duration) : "Reading…"}</strong></span><span>Frame rate <strong>{job ? `${formatFps(job.input.fps)} FPS` : "Read on upload"}</strong></span><span>Codec <strong>{job?.input.codec.toUpperCase() ?? "Read on upload"}</strong></span><span>Bitrate <strong>{job ? formatBitrate(job.input.bitrate) : "Read on upload"}</strong></span><span>Dynamic range <strong>{job?.input.dynamicRange ?? "Read on upload"}</strong></span></div>
+                        <div className="selection-details"><span>Resolution <strong>{localVideo?.width ? `${localVideo.width} × ${localVideo.height}` : "Reading…"}</strong></span><span>Duration <strong>{localVideo?.duration ? formatDuration(localVideo.duration) : "Reading…"}</strong></span><span>Frame rate <strong>{job ? `${formatFps(job.input.fps)} FPS` : "Read on upload"}</strong></span><span>Codec <strong>{job?.input.codec.toUpperCase() ?? "Read on upload"}</strong></span><span>Bitrate <strong>{job ? formatBitrate(job.input.bitrate) : "Read on upload"}</strong></span><span>Dynamic range <strong>{job ? `${job.input.dynamicRange} · ${job.input.bitDepth}-bit` : "Read on upload"}</strong></span></div>
                       </div>
                     ) : (
                       <>
@@ -571,9 +572,9 @@ export default function Workspace() {
                   <div className="output-row"><span>Rate control</span><strong>{job?.settings.rateControl === "bitrate" ? `Target ${formatBitrate((job.settings.videoBitrateKbps ?? 0) * 1_000)}` : `${selectedLabel(qualities, job?.settings.quality ?? "maximum")} · CRF ${job?.settings.quality === "maximum" ? "18" : job?.settings.quality === "high" ? "20" : "23"}`}</strong></div>
                   <div className="output-row"><span>Video codec</span><strong>{job?.output?.codec.toUpperCase()}</strong></div>
                   <div className="output-row"><span>Bitrate</span><strong>{formatBitrate(job?.output?.bitrate)}</strong></div>
-                  <div className="output-row"><span>Dynamic range</span><strong>{job?.output?.dynamicRange ?? "Unknown"}</strong></div>
+                  <div className="output-row"><span>Dynamic range</span><strong>{job?.output ? `${job.output.dynamicRange} · ${job.output.bitDepth}-bit` : "Unknown"}</strong></div>
                   <div className="output-row"><span>Original bitrate</span><strong>{formatBitrate(job?.input.bitrate)}</strong></div>
-                  <div className="output-row"><span>Original dynamic range</span><strong>{job?.input.dynamicRange ?? "Unknown"}</strong></div>
+                  <div className="output-row"><span>Original dynamic range</span><strong>{job?.input ? `${job.input.dynamicRange} · ${job.input.bitDepth}-bit` : "Unknown"}</strong></div>
                   <div className="output-row"><span>Audio</span><strong>AAC · 192 kbps</strong></div>
                   <div className="output-row"><span>Sharpening</span><strong>{selectedLabel(sharpeningOptions, job?.settings.sharpening ?? "off")}</strong></div>
                   <div className="output-row"><span>Color grade</span><strong>{selectedLabel(colorGradeOptions, job?.settings.colorGrade ?? "off")}</strong></div>
@@ -624,7 +625,7 @@ export default function Workspace() {
                     <label className="setting-row" htmlFor="output-color-grade"><span><span className="setting-icon"><Sparkles size={15} /></span>Color grade</span><span className="setting-select-wrap"><select id="output-color-grade" className="setting-select" value={colorGrade} onChange={(event) => setColorGrade(event.target.value as ColorGrade)} disabled={settingsDisabled} aria-label="Color grading">{colorGradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></span></label>
                     <div className="setting-row"><span><span className="setting-icon"><AudioLines size={15} /></span>Audio</span><strong>High quality AAC <ChevronDown size={14} /></strong></div>
                   </div>
-                  <div className="settings-footnote"><Check size={13} /> {rateControl === "bitrate" ? `Average video bitrate target: ${formatBitrate(Number(videoBitrateKbps) * 1_000)}. Actual bitrate can vary with video content.` : "CRF targets visual quality; lower values preserve more detail."} Output target: {resolution === "original" ? "keep original resolution" : `up to ${selectedLabel(resolutionOptions, resolution)}`} · {frameRate === "original" ? "keep original FPS" : selectedLabel(frameRateOptions, frameRate)}. Smaller videos won’t upscale. Sharpening and color grading are optional and off by default.</div>
+                  <div className="settings-footnote"><Check size={13} /> {rateControl === "bitrate" ? `Average video bitrate target: ${formatBitrate(Number(videoBitrateKbps) * 1_000)}. Actual bitrate can vary with video content.` : "CRF targets visual quality; lower values preserve more detail."} HDR sources stay HDR; SDR sources stay SDR. Output target: {resolution === "original" ? "keep original resolution" : `up to ${selectedLabel(resolutionOptions, resolution)}`} · {frameRate === "original" ? "keep original FPS" : selectedLabel(frameRateOptions, frameRate)}. Smaller videos won’t upscale. Sharpening and color grading are optional and off by default.</div>
                   <button className="button button-primary start-button" onClick={startCompression} disabled={!file || phase !== "idle" || (rateControl === "bitrate" && !validBitrate)}>
                     Start compression <ArrowRight size={16} />
                   </button>

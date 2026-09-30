@@ -56,6 +56,10 @@ export type VideoInfo = {
   codec: string;
   bitrate?: number;
   dynamicRange: VideoDynamicRange;
+  bitDepth: number;
+  colorPrimaries?: string;
+  colorTransfer?: string;
+  colorSpace?: string;
   frameCount?: number;
   rotation?: number;
 };
@@ -87,7 +91,11 @@ type ProbeStream = {
   duration?: string;
   bit_rate?: string;
   nb_frames?: string;
+  bits_per_raw_sample?: string;
+  pix_fmt?: string;
+  color_primaries?: string;
   color_transfer?: string;
+  color_space?: string;
   tags?: { rotate?: string };
   side_data_list?: { rotation?: number }[];
 };
@@ -188,6 +196,13 @@ function positiveNumber(value?: string) {
   return Number.isFinite(number) && number > 0 ? number : undefined;
 }
 
+function videoBitDepth(stream: ProbeStream) {
+  const reported = positiveNumber(stream.bits_per_raw_sample);
+  if (reported) return reported;
+  const pixelFormatDepth = /p(\d+)(?:le|be)?$/i.exec(stream.pix_fmt ?? "");
+  return pixelFormatDepth ? Number(pixelFormatDepth[1]) : 8;
+}
+
 function dynamicRange(colorTransfer?: string): VideoDynamicRange {
   switch (colorTransfer?.toLowerCase()) {
     case "smpte2084":
@@ -219,7 +234,7 @@ function executeProbe(filePath: string): Promise<ProbeOutput> {
       [
         "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "stream=codec_name,width,height,avg_frame_rate,r_frame_rate,duration,bit_rate,nb_frames,color_transfer:stream_tags=rotate:stream_side_data=rotation:format=duration,bit_rate",
+        "-show_entries", "stream=codec_name,width,height,avg_frame_rate,r_frame_rate,duration,bit_rate,nb_frames,bits_per_raw_sample,pix_fmt,color_primaries,color_transfer,color_space:stream_tags=rotate:stream_side_data=rotation:format=duration,bit_rate",
         "-of", "json",
         filePath,
       ],
@@ -271,6 +286,10 @@ export async function probeVideo(filePath: string): Promise<VideoInfo> {
     codec: stream.codec_name,
     bitrate,
     dynamicRange: dynamicRange(stream.color_transfer),
+    bitDepth: videoBitDepth(stream),
+    colorPrimaries: stream.color_primaries,
+    colorTransfer: stream.color_transfer,
+    colorSpace: stream.color_space,
     frameCount: Number.isSafeInteger(frameCount) && frameCount > 0 ? frameCount : undefined,
     rotation: stream.side_data_list?.find((sideData) => Number.isFinite(sideData.rotation))?.rotation
       ?? (stream.tags?.rotate ? Number(stream.tags.rotate) : undefined),
@@ -505,6 +524,7 @@ function runCompression(job: VideoJob) {
     startNextEncoding();
   };
 
+  const isHdrInput = job.input.dynamicRange === "HDR";
   if (job.input.width % 2 !== 0 || job.input.height % 2 !== 0) {
     setJobError(job, "This video has odd pixel dimensions, which cannot be encoded as yuv420p without changing its resolution.");
     releaseSlot();
@@ -552,7 +572,11 @@ function runCompression(job: VideoJob) {
       : ["-crf", crf]),
     "-threads:v", "1",
     ...(filters.length ? ["-vf", filters.join(",")] : []),
-    "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
+    "-pix_fmt", isHdrInput ? "yuv420p10le" : "yuv420p",
+    ...(job.input.colorPrimaries ? ["-color_primaries", job.input.colorPrimaries] : []),
+    ...(job.input.colorTransfer ? ["-color_trc", job.input.colorTransfer] : []),
+    ...(job.input.colorSpace ? ["-colorspace", job.input.colorSpace] : []),
+    "-fps_mode", "passthrough",
     "-c:a", "aac", "-b:a", "192k",
     "-movflags", "+faststart",
     "-progress", "pipe:1",
@@ -623,6 +647,9 @@ function runCompression(job: VideoJob) {
       }
       const output = await probeVideo(job.outputPath);
       if (output.codec !== "h264") throw new Error(`Expected H.264 output, found ${output.codec}.`);
+      if (isHdrInput && (output.dynamicRange !== "HDR" || output.bitDepth < 10)) {
+        throw new Error(`HDR preservation failed: expected a 10-bit HDR output, found ${output.bitDepth}-bit ${output.dynamicRange}.`);
+      }
       if (output.width !== job.input.width || output.height !== job.input.height) {
         if (job.settings.resolution === "original") {
           throw new Error(`Output dimensions ${output.width}x${output.height} differ from input ${job.input.width}x${job.input.height}.`);
